@@ -368,10 +368,10 @@ horse.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("a user disconnected");
+    console.log("a user disconnected");3
   });
 });
 
-http.listen(3000, () => {
+http.listen(443, () => {
   console.log("listening on *:3000");
 });
