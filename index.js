@@ -1,7 +1,7 @@
 var express = require("express");
 var app = express();
 
-app.use(express.static("../ui/dist"))
+app.use(express.static("ui"))
 var http = require("http").createServer(app);
 var io = require("socket.io")(http, { cors: { origin: true } });
 var Timeout = require("await-timeout");
