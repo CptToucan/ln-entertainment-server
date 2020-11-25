@@ -1,6 +1,8 @@
 var express = require("express");
 var app = express();
 
+const PORT = process.env.PORT || 3000;
+
 app.use(express.static("ui"))
 var http = require("http").createServer(app);
 var io = require("socket.io")(http, { cors: { origin: true } });
@@ -372,6 +374,6 @@ horse.on("connection", (socket) => {
   });
 });
 
-http.listen(3000, () => {
+http.listen(PORT, () => {
   console.log("listening on *:3000");
 });
