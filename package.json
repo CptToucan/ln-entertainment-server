@@ -1,0 +1,19 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@reduxjs/toolkit": "^1.4.0",
+    "await-timeout": "^1.1.1",
+    "express": "^4.17.1",
+    "redux": "^4.0.5",
+    "socket.io": "^3.0.2",
+    "uuid": "^8.3.1"
+  }
+}
