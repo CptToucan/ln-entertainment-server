@@ -441,7 +441,7 @@ horse.on("connection", (socket) => {
     activeGameState = updateGameForGameCode(gameCode, activeGameState)
 
     for (
-      let timerInSeconds = RESULTS_PHASE_SECS;
+      let timerInSeconds = 90;
       timerInSeconds >= 0;
       timerInSeconds--
     ) {
