@@ -218,7 +218,7 @@ async function runRaceLoop(_gameToEdit, gameCode) {
     await Timeout.set(TIME_BETWEEN_RACE_TICKS);
   }
 
-  await Timeout.set(5 * ONE_SEC)
+  await Timeout.set(5 * ONE_SEC);
 
   function determineWinnerFromRace(race) {
     let furthestChicken = 0;
@@ -295,7 +295,6 @@ async function runRaceLoop(_gameToEdit, gameCode) {
   let finalGameState = updateGameForGameCode(gameCode, newGameToEdit);
   horse.to(gameCode).emit("update game state", finalGameState);
 
-
   for (
     let timerInSeconds = RESULTS_PHASE_SECS;
     timerInSeconds >= 0;
@@ -343,46 +342,57 @@ horse.on("connection", (socket) => {
   });
 
   socket.on("connect to game", (gameCodeToJoin, username, callback) => {
-    socket.join(gameCodeToJoin);
-    let game = findGameForCode(gameCodeToJoin);
-
-    if (game) {
-      let newPlayer = generatePlayer(username, gameCodeToJoin);
-      game.players.push(newPlayer);
-      callback(gameCodeToJoin, newPlayer);
-
-      horse.to(gameCodeToJoin).emit("update game state", game);
-    } else {
-      callback(null);
+    try {
+      socket.join(gameCodeToJoin);
+      let game = findGameForCode(gameCodeToJoin);
+  
+      if (game) {
+        let newPlayer = generatePlayer(username, gameCodeToJoin);
+        game.players.push(newPlayer);
+        callback(gameCodeToJoin, newPlayer);
+  
+        horse.to(gameCodeToJoin).emit("update game state", game);
+      } else {
+        callback(null);
+      }
     }
+    catch(err) {
+      console.error(err);
+    }
+
   });
 
   socket.on("update bet", (playerId, newBetOptions) => {
-    let gameState = findGameForPlayerId(playerId);
-    let gameCode = findGameCodeForPlayerId(playerId);
-    let newGameToEdit = JSON.clone(gameState);
-    let playerState = newGameToEdit.gameState.playerState[playerId];
+    try {
+      let gameState = findGameForPlayerId(playerId);
+      let gameCode = findGameCodeForPlayerId(playerId);
 
-    let newTotalMoney = playerState.totalMoney;
+      let newGameToEdit = JSON.clone(gameState);
+      let playerState = newGameToEdit.gameState.playerState[playerId];
 
-    for (let horseId in newBetOptions) {
-      let moneyOnHorse = newBetOptions[horseId];
-      newTotalMoney -= moneyOnHorse;
-      playerState.bets[horseId] = moneyOnHorse;
+      let newTotalMoney = playerState.totalMoney;
+
+      for (let horseId in newBetOptions) {
+        let moneyOnHorse = newBetOptions[horseId];
+        newTotalMoney -= moneyOnHorse;
+        playerState.bets[horseId] = moneyOnHorse;
+      }
+
+      playerState.totalMoney = newTotalMoney;
+
+      horse
+        .to(gameCode)
+        .emit(
+          "update game state",
+          updateGameForPlayerId(playerId, newGameToEdit)
+        );
+    } catch (err) {
+      console.error(err);
     }
-
-    playerState.totalMoney = newTotalMoney;
-
-    horse
-      .to(gameCode)
-      .emit(
-        "update game state",
-        updateGameForPlayerId(playerId, newGameToEdit)
-      );
   });
 
   socket.on("assign drinks", (ownPlayerId, drinkOptions) => {
-    //debugger;
+    try {
     let gameState = findGameForPlayerId(ownPlayerId);
     let gameCode = findGameCodeForPlayerId(ownPlayerId);
     let newGameToEdit = JSON.clone(gameState);
@@ -399,6 +409,10 @@ horse.on("connection", (socket) => {
         "update game state",
         updateGameForPlayerId(ownPlayerId, newGameToEdit)
       );
+    }
+    catch(err) {
+      console.error(err);
+    }
   });
 
   socket.on("start game", async (player) => {
@@ -428,23 +442,13 @@ horse.on("connection", (socket) => {
 
     activeGameState.gameState.phase = "FINISH";
 
-    activeGameState = updateGameForPlayerId(player.id, activeGameState)
+    activeGameState = updateGameForPlayerId(player.id, activeGameState);
 
-    horse
-      .to(gameCode)
-      .emit(
-        "update game state",
-        activeGameState
-      );
+    horse.to(gameCode).emit("update game state", activeGameState);
 
+    activeGameState = updateGameForGameCode(gameCode, activeGameState);
 
-    activeGameState = updateGameForGameCode(gameCode, activeGameState)
-
-    for (
-      let timerInSeconds = 90;
-      timerInSeconds >= 0;
-      timerInSeconds--
-    ) {
+    for (let timerInSeconds = 90; timerInSeconds >= 0; timerInSeconds--) {
       let newGameToEdit = JSON.clone(findGameForCode(gameCode));
       activeGameState = updateGameForGameCode(gameCode, newGameToEdit);
 
@@ -458,17 +462,15 @@ horse.on("connection", (socket) => {
       await Timeout.set(ONE_SEC);
     }
 
-    
     activeGameState = JSON.clone(findGameForCode(gameCode));
     activeGameState.gameState.phase = "END";
-    
+
     horse
       .to(gameCode)
       .emit(
         "update game state",
         updateGameForPlayerId(player.id, activeGameState)
       );
-
   });
 
   socket.on("disconnect", () => {
