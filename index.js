@@ -3,7 +3,7 @@ var app = express();
 
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static("ui"))
+app.use(express.static("ui"));
 var http = require("http").createServer(app);
 var io = require("socket.io")(http, { cors: { origin: true } });
 var Timeout = require("await-timeout");
@@ -16,6 +16,9 @@ const TIME_BETWEEN_RACE_TICKS = 2000;
 const TIME_BETWEEN_ROUNDS = 60000;
 const TIME_BETWEEN_PHASES = 10000;
 const ONE_SEC = 1000;
+const BETTING_PHASE_SECS = 30;
+const RESULTS_PHASE_SECS = 30;
+const NUMBER_OF_ROUNDS = 5;
 
 var allGames = {};
 var playerIdToGameCodeMap = {};
@@ -66,6 +69,7 @@ function generateDefaultGameState() {
     usedNameIndexes.push(nameIndex);
 
     let horse = {
+      id: horseNames[nameIndex],
       name: horseNames[nameIndex],
       speed: randomHorseSeed(),
       bets: {},
@@ -81,10 +85,12 @@ function generateDefaultGameState() {
   };
 }
 
-function generateDefaultPlayerState(playerId) {
+function generateDefaultPlayerState(playerId, displayName) {
   return {
     id: playerId,
+    displayName,
     totalMoney: 10,
+    drinksToDrink: 0,
     availablePowerups: {},
     bets: {},
   };
@@ -139,11 +145,13 @@ function generateRaceFromHorses(horses) {
 }
 
 function findDisplayNameForUserId(userId, playersInGame) {
-  let foundPlayer = playersInGame.find(player => {return userId === player.id});
-   if(foundPlayer) {
-     return foundPlayer.displayName;
-   }
-   return null;
+  let foundPlayer = playersInGame.find((player) => {
+    return userId === player.id;
+  });
+  if (foundPlayer) {
+    return foundPlayer.displayName;
+  }
+  return null;
 }
 
 async function runRaceLoop(_gameToEdit, gameCode) {
@@ -156,13 +164,20 @@ async function runRaceLoop(_gameToEdit, gameCode) {
     .emit("update game state", updateGameForGameCode(gameCode, gameToEdit));
 
   // Start Betting Phase
-  for (let timerInSeconds = 5; timerInSeconds >= 0; timerInSeconds--) {
+  for (
+    let timerInSeconds = BETTING_PHASE_SECS;
+    timerInSeconds >= 0;
+    timerInSeconds--
+  ) {
     let newGameToEdit = JSON.clone(findGameForCode(gameCode));
     newGameToEdit.gameState.timer = timerInSeconds;
     horse
       .to(gameCode)
-      .emit("update game state", updateGameForGameCode(gameCode, newGameToEdit));
-      await Timeout.set(ONE_SEC);
+      .emit(
+        "update game state",
+        updateGameForGameCode(gameCode, newGameToEdit)
+      );
+    await Timeout.set(ONE_SEC);
   }
   // End Betting Phase
 
@@ -178,12 +193,11 @@ async function runRaceLoop(_gameToEdit, gameCode) {
 
   newGameToEdit.gameState.phase = "RACE";
   let race = generateRaceFromHorses(newGameToEdit.gameState.horses);
-  newGameToEdit.gameState.race =  race;
+  newGameToEdit.gameState.race = race;
   updateGameForGameCode(gameCode, newGameToEdit);
   var activeRace = race;
-  await Timeout.set(2000)
+  await Timeout.set(2000);
   while (!hasAHorseFinished(activeRace)) {
-    
     let newGameToEdit = JSON.clone(findGameForCode(gameCode));
 
     let race = newGameToEdit.gameState.race;
@@ -192,15 +206,19 @@ async function runRaceLoop(_gameToEdit, gameCode) {
         return chicken.name === _chicken;
       });
       let speed = foundChicken.speed;
-      race[_chicken].position +=
-        speed * (Math.floor(Math.random() * 10) + 1);
+      race[_chicken].position += speed * (Math.floor(Math.random() * 10) + 1);
     }
     activeRace = race;
     horse
       .to(gameCode)
-      .emit("update game state", updateGameForGameCode(gameCode, newGameToEdit));
-      await Timeout.set(TIME_BETWEEN_RACE_TICKS);
+      .emit(
+        "update game state",
+        updateGameForGameCode(gameCode, newGameToEdit)
+      );
+    await Timeout.set(TIME_BETWEEN_RACE_TICKS);
   }
+
+  await Timeout.set(5 * ONE_SEC)
 
   function determineWinnerFromRace(race) {
     let furthestChicken = 0;
@@ -219,7 +237,6 @@ async function runRaceLoop(_gameToEdit, gameCode) {
     let losingPlayers = [];
     let didNotBetPlayers = [];
     for (let playerId in allPlayerState) {
-
       let didNotBet = true;
       let didWin = false;
       let didLose = false;
@@ -227,41 +244,50 @@ async function runRaceLoop(_gameToEdit, gameCode) {
       let playerState = allPlayerState[playerId];
 
       for (let chickenBetOn in playerState.bets) {
-        if(chickenBetOn) {
+        if (chickenBetOn) {
           didNotBet = false;
-          didLose = true;
         }
         if (chickenBetOn === winningChicken) {
           playerState.totalMoney += 2 * playerState.bets[chickenBetOn];
-          
+
           didLose = false;
           didWin = true;
-          break;
+        } else {
+          playerState.drinksToDrink += playerState.bets[chickenBetOn];
         }
+      }
 
-        
+      if (didWin === false && didNotBet === false) {
+        didLose = true;
       }
-      if(didNotBet) {
-        didNotBetPlayers.push(findDisplayNameForUserId(playerId, gameState.players));
-      }
-      else if(didLose) {
-        losingPlayers.push(findDisplayNameForUserId(playerId, gameState.players));
-      }
-      else if(didWin) {
-        winningPlayers.push(findDisplayNameForUserId(playerId, gameState.players));
+
+      if (didNotBet) {
+        didNotBetPlayers.push(
+          findDisplayNameForUserId(playerId, gameState.players)
+        );
+      } else if (didLose) {
+        losingPlayers.push(
+          findDisplayNameForUserId(playerId, gameState.players)
+        );
+      } else if (didWin) {
+        winningPlayers.push(
+          findDisplayNameForUserId(playerId, gameState.players)
+        );
       }
     }
 
     gameState.gameState.winningPlayers = winningPlayers;
     gameState.gameState.losingPlayers = losingPlayers;
-    gameState.gameState.didNotBet = didNotBet;
-
-
+    gameState.gameState.didNotBetPlayers = didNotBetPlayers;
   }
 
   newGameToEdit = JSON.clone(findGameForCode(gameCode));
   let winner = determineWinnerFromRace(newGameToEdit.gameState.race);
-  assignWinningsFromBets(newGameToEdit, newGameToEdit.gameState.playerState, winner);
+  assignWinningsFromBets(
+    newGameToEdit,
+    newGameToEdit.gameState.playerState,
+    winner
+  );
 
   newGameToEdit.gameState.phase = "RESULTS";
   newGameToEdit.gameState.winnerOfRound = winner;
@@ -269,17 +295,35 @@ async function runRaceLoop(_gameToEdit, gameCode) {
   let finalGameState = updateGameForGameCode(gameCode, newGameToEdit);
   horse.to(gameCode).emit("update game state", finalGameState);
 
-  await Timeout.set(TIME_BETWEEN_PHASES);
+
+  for (
+    let timerInSeconds = RESULTS_PHASE_SECS;
+    timerInSeconds >= 0;
+    timerInSeconds--
+  ) {
+    let newGameToEdit = JSON.clone(findGameForCode(gameCode));
+    finalGameState = updateGameForGameCode(gameCode, newGameToEdit);
+
+    finalGameState.gameState.timer = timerInSeconds;
+    horse
+      .to(gameCode)
+      .emit(
+        "update game state",
+        updateGameForGameCode(gameCode, finalGameState)
+      );
+    await Timeout.set(ONE_SEC);
+  }
 
   return finalGameState;
 }
 
-
 function resetGameStateForNextRound(gameState) {
   let newGameState = JSON.clone(gameState);
-  newGameState.gameState.race = generateRaceFromHorses(newGameState.gameState.horses);
+  newGameState.gameState.race = generateRaceFromHorses(
+    newGameState.gameState.horses
+  );
   let playerStates = newGameState.gameState.playerState;
-  for(let playerId in playerStates) {
+  for (let playerId in playerStates) {
     playerStates[playerId].bets = {};
   }
   return newGameState;
@@ -319,32 +363,41 @@ horse.on("connection", (socket) => {
     let newGameToEdit = JSON.clone(gameState);
     let playerState = newGameToEdit.gameState.playerState[playerId];
 
-    if (playerState.bets[newBetOptions.horseName] === undefined) {
-      playerState.bets[newBetOptions.horseName] = 0;
+    let newTotalMoney = playerState.totalMoney;
+
+    for (let horseId in newBetOptions) {
+      let moneyOnHorse = newBetOptions[horseId];
+      newTotalMoney -= moneyOnHorse;
+      playerState.bets[horseId] = moneyOnHorse;
     }
 
-    let newTotalMoney = playerState.totalMoney - newBetOptions.difference;
-    let newBetTotal =
-      playerState.bets[newBetOptions.horseName] + newBetOptions.difference;
-
-    if (newTotalMoney < 0 || newBetTotal < 0) {
-      newGameToEdit = gameState;
-      horse
-        .to(gameCode)
-        .emit(
-          "update game state",
-          updateGameForPlayerId(playerId, newGameToEdit)
-        );
-      return;
-    }
-
-    playerState.bets[newBetOptions.horseName] = newBetTotal;
     playerState.totalMoney = newTotalMoney;
+
     horse
       .to(gameCode)
       .emit(
         "update game state",
         updateGameForPlayerId(playerId, newGameToEdit)
+      );
+  });
+
+  socket.on("assign drinks", (ownPlayerId, drinkOptions) => {
+    //debugger;
+    let gameState = findGameForPlayerId(ownPlayerId);
+    let gameCode = findGameCodeForPlayerId(ownPlayerId);
+    let newGameToEdit = JSON.clone(gameState);
+    let allPlayerStates = newGameToEdit.gameState.playerState;
+    let playerState = allPlayerStates[ownPlayerId];
+
+    for (let playerId in drinkOptions) {
+      allPlayerStates[playerId].drinksToDrink += Number(drinkOptions[playerId]);
+    }
+
+    horse
+      .to(gameCode)
+      .emit(
+        "update game state",
+        updateGameForPlayerId(ownPlayerId, newGameToEdit)
       );
   });
 
@@ -357,20 +410,70 @@ horse.on("connection", (socket) => {
 
     let playerState = {};
     for (let player of gameToEdit.players) {
-      playerState[player.id] = generateDefaultPlayerState(player.id);
+      playerState[player.id] = generateDefaultPlayerState(
+        player.id,
+        player.displayName
+      );
       playerIdToGameCodeMap[player.id] = gameCode;
     }
     gameToEdit.gameState.playerState = playerState;
 
     let activeGameState = gameToEdit;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < NUMBER_OF_ROUNDS; i++) {
       let currentGameState = await runRaceLoop(activeGameState, gameCode);
       activeGameState = resetGameStateForNextRound(currentGameState);
     }
+
+    activeGameState = JSON.clone(activeGameState);
+
+    activeGameState.gameState.phase = "FINISH";
+
+    activeGameState = updateGameForPlayerId(player.id, activeGameState)
+
+    horse
+      .to(gameCode)
+      .emit(
+        "update game state",
+        activeGameState
+      );
+
+
+    activeGameState = updateGameForGameCode(gameCode, activeGameState)
+
+    for (
+      let timerInSeconds = RESULTS_PHASE_SECS;
+      timerInSeconds >= 0;
+      timerInSeconds--
+    ) {
+      let newGameToEdit = JSON.clone(findGameForCode(gameCode));
+      activeGameState = updateGameForGameCode(gameCode, newGameToEdit);
+
+      activeGameState.gameState.timer = timerInSeconds;
+      horse
+        .to(gameCode)
+        .emit(
+          "update game state",
+          updateGameForGameCode(gameCode, activeGameState)
+        );
+      await Timeout.set(ONE_SEC);
+    }
+
+    
+    activeGameState = JSON.clone(findGameForCode(gameCode));
+    activeGameState.gameState.phase = "END";
+    
+    horse
+      .to(gameCode)
+      .emit(
+        "update game state",
+        updateGameForPlayerId(player.id, activeGameState)
+      );
+
   });
 
   socket.on("disconnect", () => {
-    console.log("a user disconnected");3
+    console.log("a user disconnected");
+    3;
   });
 });
 
